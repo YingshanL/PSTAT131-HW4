@@ -1,0 +1,171 @@
+---
+title: "Homework4"
+author: "Yingshan Li (7937790)"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(dplyr)
+library(magrittr)
+library(tidymodels)
+library(tidyverse)
+library(corrr)
+library(discrim)
+library(poissonreg)
+library(corrr)
+library(klaR)
+```
+
+
+Load the data
+```{r}
+titanic <- read.csv(file = "titanic.csv" )
+titanic1 <- titanic %>% mutate(survived = factor(survived, levels = c("Yes", "No"))) %>% 
+  mutate(pclass = factor(pclass))
+```
+
+```{r}
+set.seed(3435)
+```
+
+
+Question 1
+```{r}
+titanic_split <- initial_split(titanic1, prop = 0.70, strata = survived)
+titanic_train <- training(titanic_split)
+titanic_test <- testing(titanic_split)
+```
+
+Verify correct number of observations in each data set
+```{r}
+dim(titanic_train)
+```
+
+```{r}
+dim(titanic_test)
+```
+
+Create Recipe same as HW3
+```{r}
+titanic_recipe <- recipe(survived ~ pclass + sex + age + sib_sp + parch + fare, data = titanic_train) %>%
+  step_impute_linear(age) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_interact(~ starts_with("sex"):fare + age:fare)
+```
+
+Question 2
+
+Fold the training data
+```{r}
+titanic_folds <- vfold_cv(titanic_train, k = 10)
+titanic_folds
+```
+ 
+Question 3
+
+k-fold cross-validation is a resampling method. The training data are randomly partitioned into specified sets of roughly equal size for which we called each set the folds. For example, for 10-fold cross validation, for each iterations of resampling, one fold is held out as assessment set to evaluate the model , and all the 9 remaining folds are used as analysis set to fit the model. The final resampling estimate of  model performance is the averages of each of the iteration. It is a better model evaluation method because simply fitting and testing models on the training set will result in an artificially optimistic estimate of the performance since the model is built based on the training data set. 
+If we use the entire training set, the resampling method would be the validation set approach.
+
+Question 4
+
+Logistic Regression
+```{r}
+log_reg <- logistic_reg() %>% 
+  set_engine("glm") %>% 
+  set_mode("classification")
+
+log_wkflow <- workflow() %>% 
+  add_model(log_reg) %>% 
+  add_recipe(titanic_recipe)
+```
+
+Linear discriminant analysis
+```{r}
+lda_mod <- discrim_linear() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+lda_wkflow <- workflow() %>% 
+  add_model(lda_mod) %>% 
+  add_recipe(titanic_recipe)
+```
+
+Quadratic discriminant analysis
+```{r}
+qda_mod <- discrim_quad() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+qda_wkflow <- workflow() %>% 
+  add_model(qda_mod) %>% 
+  add_recipe(titanic_recipe)
+```
+
+In total, I will be fitting 30 models, 10 for each type of model because fitting 1 times for each of 10 folds.
+
+Question 5
+```{r}
+log_res <- log_wkflow %>% 
+  fit_resamples(resamples = titanic_folds)
+```
+
+```{r}
+lda_res <- lda_wkflow %>% 
+  fit_resamples(resamples = titanic_folds)
+```
+
+```{r}
+qda_res <- qda_wkflow %>% 
+  fit_resamples(resamples = titanic_folds)
+```
+
+
+```{r}
+log_acc <- collect_metrics(log_res)
+log_acc
+```
+
+```{r}
+lda_acc <- collect_metrics(lda_res)
+lda_acc
+```
+
+```{r}
+qda_acc <- collect_metrics(qda_res)
+qda_acc
+```
+
+```{r}
+mean_accuracy <- c(log_acc$mean[1],lda_acc$mean[1], qda_acc$mean[1])
+Standard_error <- c(log_acc$std_err[1],lda_acc$std_err[1], qda_acc$std_err[1])
+models <- c("Logistic Regression", "LDA", "QDA")
+results <- tibble(accuracies = mean_accuracy, Standard_error = Standard_error, models = models)
+results %>% 
+  arrange(-accuracies)
+
+```
+
+The logistic regression model performs the best because it has the highest mean accuracy, and its standard error is only a little bit larger than the QDA model that has the smallest standard error.
+
+Question 7
+```{r}
+log_fit <- fit(log_wkflow, titanic_train)
+log_fit %>% 
+  tidy()
+```
+
+Question 8
+```{r}
+predict(log_fit, new_data = titanic_test, type = "prob")
+```
+
+```{r}
+augment(log_fit, new_data = titanic_test) %>% 
+  accuracy(truth = survived, estimate = .pred_class)
+```
+Model's testing accuracy is slightly higher than the average accuracy across folds.
